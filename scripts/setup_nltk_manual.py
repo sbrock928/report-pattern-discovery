@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 """
 Manual NLTK Data Setup Script for Corporate Environments
 Download NLTK data manually when pip/firewall blocks automatic downloads

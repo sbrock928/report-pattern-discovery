@@ -80,10 +80,11 @@ class NLTKDownloadManager:
 
 
 class EnhancedFinancialTermExtractor:
-    """NLTK-enhanced financial term extractor"""
+    """NLTK-enhanced financial term extractor with advanced customization"""
     
     def __init__(self, config: ProcessingConfig):
         self.config = config
+        self.nltk_config = config.nltk_config
         self.financial_terms = FinancialTerms()
         self.logger = logging.getLogger(__name__)
         
@@ -92,30 +93,55 @@ class EnhancedFinancialTermExtractor:
         self.nltk_ready = self.nltk_manager.ensure_nltk_data()
         
         if self.nltk_ready:
-            self.lemmatizer = WordNetLemmatizer()
-            self.stop_words = set(stopwords.words('english'))
-            # Remove financial terms from NLTK stopwords
-            financial_keepers = {'fee', 'tax', 'a', 'b', 'c', 'd', 'e', 'f', 'interest', 'principal'}
-            self.stop_words = self.stop_words - financial_keepers
-            self.logger.info("NLTK components initialized successfully")
+            # Initialize NLTK components with domain customization
+            self._initialize_nltk_components()
+            self.logger.info("NLTK components initialized with financial domain customization")
         else:
-            # Fallback to basic stopwords
-            self.stop_words = {
-                'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 
-                'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself',
-                'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them',
-                'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this',
-                'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been',
-                'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
-                'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until',
-                'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between',
-                'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to',
-                'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
-                'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how',
-                'all', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such',
-                'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very'
-            }
+            # Fallback to basic processing
+            self._initialize_basic_components()
             self.logger.warning("NLTK not available, using basic text processing")
+    
+    def _initialize_nltk_components(self):
+        """Initialize NLTK components with financial domain customization"""
+        # Lemmatizer with custom exceptions
+        self.lemmatizer = WordNetLemmatizer()
+        
+        # Enhanced stopwords with financial domain awareness
+        base_stopwords = set(stopwords.words('english'))
+        
+        # Remove financial terms that should be preserved
+        self.stop_words = base_stopwords - self.nltk_config.financial_terms_to_preserve
+        
+        # Add domain-specific stopwords to remove
+        self.stop_words.update(self.nltk_config.financial_stopwords_to_remove)
+        
+        # Compile financial entity patterns for faster matching
+        self.financial_entity_patterns = [
+            re.compile(pattern, re.IGNORECASE) 
+            for pattern in self.nltk_config.financial_entity_patterns
+        ]
+        
+        self.logger.info(f"Configured {len(self.stop_words)} stopwords, {len(self.financial_entity_patterns)} entity patterns")
+    
+    def _initialize_basic_components(self):
+        """Initialize basic components without NLTK"""
+        # Fallback to basic stopwords
+        self.stop_words = {
+            'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 
+            'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself',
+            'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them',
+            'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this',
+            'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been',
+            'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+            'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until',
+            'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between',
+            'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to',
+            'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
+            'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how',
+            'all', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such',
+            'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very'
+        }
+        self.logger.warning("NLTK not available, using basic text processing")
         
     def extract_headers_from_excel(self, file_path: Path) -> List[dict]:
         """Extract header/label cells from Excel file with enhanced NLTK processing"""
@@ -193,35 +219,38 @@ class EnhancedFinancialTermExtractor:
         return headers
     
     def _is_enhanced_header_cell(self, cell) -> bool:
-        """Enhanced header detection using NLTK"""
+        """Enhanced header detection with configurable thresholds"""
         if not cell.value or not isinstance(cell.value, str):
             return False
             
         text = str(cell.value).strip()
         
-        if len(text) < 3 or len(text) > 200:
+        # Configurable length filtering
+        if len(text) < self.config.min_term_length or len(text) > self.config.max_term_length:
             return False
             
-        # Enhanced number filtering
+        # Configurable numeric content filtering
         number_ratio = len(re.findall(r'\d', text)) / len(text)
-        if number_ratio > 0.7:
+        if number_ratio > self.config.numeric_content_threshold:
             return False
         
-        # NLTK-enhanced financial term detection
-        if self.nltk_ready:
+        # Enhanced financial context detection
+        if self.nltk_ready and self.config.require_financial_context:
             financial_score = self._calculate_financial_score_nltk(text)
-            if financial_score > 0.3:  # Threshold for financial relevance
+            if financial_score >= self.config.financial_context_threshold:
+                return True
+            elif financial_score >= self.nltk_config.financial_relevance_threshold:
                 return True
         
         # Fallback to pattern-based detection
         return self._pattern_based_header_detection(text)
     
     def _calculate_financial_score_nltk(self, text: str) -> float:
-        """Calculate financial relevance score using NLTK"""
+        """Enhanced financial relevance scoring with domain customization"""
         try:
             # Tokenize and POS tag
             tokens = word_tokenize(text.lower())
-            pos_tags = pos_tag(tokens)
+            pos_tags = pos_tag(tokens) if self.nltk_config.use_pos_tagging else [(t, 'NN') for t in tokens]
             
             score = 0.0
             total_tokens = len(tokens)
@@ -229,61 +258,74 @@ class EnhancedFinancialTermExtractor:
             if total_tokens == 0:
                 return 0.0
             
-            # Score based on financial keywords
-            financial_keywords = {
-                'balance', 'amount', 'payment', 'fee', 'rate', 'interest', 'principal',
-                'collection', 'distribution', 'outstanding', 'aggregate', 'eligible',
-                'contract', 'loan', 'note', 'servicer', 'dealer', 'purchased',
-                'reserve', 'account', 'funds', 'available', 'allocation', 'period',
-                'class', 'tranche', 'series', 'tier', 'beginning', 'ending',
-                'carryover', 'shortfall', 'distributable', 'deficiency'
-            }
+            # Enhanced financial keyword scoring
+            strong_matches = sum(1 for token, _ in pos_tags 
+                               if token in self.financial_terms.strong_financial_indicators)
+            weak_matches = sum(1 for token, _ in pos_tags 
+                             if token in self.financial_terms.weak_financial_indicators)
             
-            financial_token_count = sum(1 for token, _ in pos_tags if token in financial_keywords)
-            score += (financial_token_count / total_tokens) * 0.8
+            # Weighted scoring for financial indicators
+            score += (strong_matches / total_tokens) * 0.8  # Strong indicators get high weight
+            score += (weak_matches / total_tokens) * 0.4    # Weak indicators get moderate weight
             
-            # Bonus for noun phrases (likely to be financial concepts)
-            noun_count = sum(1 for _, pos in pos_tags if pos.startswith('NN'))
-            score += (noun_count / total_tokens) * 0.3
+            # POS tag-based scoring with domain priorities
+            if self.nltk_config.use_pos_tagging:
+                pos_score = 0.0
+                for token, pos in pos_tags:
+                    if pos in self.nltk_config.important_pos_tags:
+                        pos_score += self.nltk_config.important_pos_tags[pos]
+                
+                score += (pos_score / total_tokens) * 0.3
             
-            # Bonus for class identifiers
-            if any(token in ['class', 'tranche'] for token, _ in pos_tags):
-                score += 0.4
+            # Enhanced class identifier detection
+            class_bonus = 0.0
+            for token, _ in pos_tags:
+                if token in ['class', 'tranche', 'series', 'tier']:
+                    class_bonus += 0.4
+                elif re.match(r'^[a-f]$', token):  # Single letter class identifiers
+                    class_bonus += 0.3
             
-            # Named Entity Recognition bonus
-            try:
-                chunked = ne_chunk(pos_tags)
-                has_named_entities = any(isinstance(chunk, Tree) for chunk in chunked)
-                if has_named_entities:
-                    score += 0.2
-            except:
-                pass
+            score += min(class_bonus, 0.6)  # Cap class bonus
+            
+            # Financial entity pattern matching
+            pattern_matches = sum(1 for pattern in self.financial_entity_patterns 
+                                if pattern.search(text))
+            if pattern_matches > 0:
+                score += min(pattern_matches * 0.2, 0.4)  # Cap pattern bonus
+            
+            # Named Entity Recognition enhancement
+            if self.nltk_config.use_named_entity_recognition:
+                try:
+                    chunked = ne_chunk(pos_tags)
+                    financial_entities = self._extract_financial_entities(chunked)
+                    if financial_entities:
+                        score += min(len(financial_entities) * 0.15, 0.3)
+                except:
+                    pass
             
             return min(score, 1.0)
             
         except Exception as e:
-            self.logger.debug(f"NLTK scoring failed for '{text}': {e}")
+            self.logger.debug(f"Enhanced NLTK scoring failed for '{text}': {e}")
             return 0.0
     
-    def _pattern_based_header_detection(self, text: str) -> bool:
-        """Fallback pattern-based header detection"""
-        financial_keywords = [
-            'balance', 'amount', 'payment', 'fee', 'rate', 'interest', 'principal',
-            'collection', 'distribution', 'outstanding', 'aggregate', 'eligible',
-            'contract', 'loan', 'note', 'servicer', 'dealer', 'purchased',
-            'reserve', 'account', 'funds', 'available', 'allocation', 'period',
-            'class', 'tranche', 'series', 'tier', 'beginning', 'ending'
-        ]
+    def _extract_financial_entities(self, chunked_tokens) -> List[str]:
+        """Extract financial entities from NER-chunked tokens"""
+        entities = []
         
-        text_lower = text.lower()
-        return any(keyword in text_lower for keyword in financial_keywords)
+        for chunk in chunked_tokens:
+            if hasattr(chunk, 'label'):  # It's a named entity
+                entity_text = ' '.join([token for token, pos in chunk.leaves()])
+                entities.append(entity_text)
+        
+        return entities
     
     def _enhanced_clean_financial_text(self, text: str) -> str:
-        """Enhanced text cleaning using NLTK"""
+        """Enhanced text cleaning with advanced NLTK customization"""
         if not text:
             return ""
         
-        # Basic cleaning
+        # Basic cleaning (same as before)
         text = text.lower().strip()
         text = re.sub(r'\d+\.?\d*\s*%', '', text)
         text = re.sub(r'\$[\d,]+\.?\d*', '', text)
@@ -293,42 +335,39 @@ class EnhancedFinancialTermExtractor:
         text = re.sub(r'[:\.,;]+$', '', text)
         
         if self.nltk_ready:
-            return self._nltk_enhanced_cleaning(text)
+            return self._advanced_nltk_cleaning(text)
         else:
             return self._basic_cleaning(text)
     
-    def _nltk_enhanced_cleaning(self, text: str) -> str:
-        """NLTK-powered text cleaning with lemmatization"""
+    def _advanced_nltk_cleaning(self, text: str) -> str:
+        """Advanced NLTK cleaning with financial domain intelligence"""
         try:
             # Tokenize
             tokens = word_tokenize(text)
             
-            # POS tagging to preserve important terms
-            pos_tags = pos_tag(tokens)
+            # POS tagging for intelligent processing
+            pos_tags = pos_tag(tokens) if self.nltk_config.use_pos_tagging else [(t, 'NN') for t in tokens]
             
-            # Lemmatize while preserving financial terms
+            # Advanced lemmatization with domain customization
             cleaned_tokens = []
-            financial_preserve = {'fees', 'balances', 'amounts', 'payments', 'interests', 'principals'}
             
             for token, pos in pos_tags:
-                # Skip very short words except important class identifiers
-                if len(token) < 2 and token not in {'a', 'b', 'c', 'd', 'e', 'f'}:
+                # Skip very short words except critical financial identifiers
+                if len(token) < self.config.min_term_length and token not in self.nltk_config.financial_terms_to_preserve:
                     continue
                 
-                # Skip stopwords except financial terms
-                if token in self.stop_words:
+                # Skip stopwords except preserved financial terms
+                if token in self.stop_words and token not in self.nltk_config.financial_terms_to_preserve:
                     continue
                 
-                # Lemmatize if not a special financial term
-                if token not in financial_preserve:
-                    # Convert POS tag to WordNet format
-                    wordnet_pos = self._get_wordnet_pos(pos)
-                    lemmatized = self.lemmatizer.lemmatize(token, wordnet_pos)
-                    cleaned_tokens.append(lemmatized)
+                # Apply custom lemmatization
+                if self.nltk_config.use_lemmatization:
+                    lemmatized_token = self._custom_lemmatize(token, pos)
+                    cleaned_tokens.append(lemmatized_token)
                 else:
                     cleaned_tokens.append(token)
             
-            # Remove consecutive duplicates
+            # Remove consecutive duplicates while preserving order
             deduplicated = []
             prev_token = None
             for token in cleaned_tokens:
@@ -339,21 +378,24 @@ class EnhancedFinancialTermExtractor:
             return ' '.join(deduplicated)
             
         except Exception as e:
-            self.logger.debug(f"NLTK cleaning failed: {e}")
+            self.logger.debug(f"Advanced NLTK cleaning failed: {e}")
             return self._basic_cleaning(text)
     
-    def _get_wordnet_pos(self, treebank_tag: str) -> str:
-        """Convert TreeBank POS tag to WordNet POS tag"""
-        if treebank_tag.startswith('J'):
-            return 'a'  # adjective
-        elif treebank_tag.startswith('V'):
-            return 'v'  # verb
-        elif treebank_tag.startswith('N'):
-            return 'n'  # noun
-        elif treebank_tag.startswith('R'):
-            return 'r'  # adverb
-        else:
-            return 'n'  # default to noun
+    def _custom_lemmatize(self, token: str, pos: str) -> str:
+        """Custom lemmatization with financial domain exceptions"""
+        # Check for custom exceptions first
+        if token in self.nltk_config.custom_lemma_exceptions:
+            return self.nltk_config.custom_lemma_exceptions[token]
+        
+        # Preserve certain financial plurals if configured
+        if (self.nltk_config.preserve_financial_plurals and 
+            token in self.nltk_config.financial_terms_to_preserve and
+            token.endswith('s')):
+            return token  # Keep original form
+        
+        # Standard lemmatization with POS context
+        wordnet_pos = self._get_wordnet_pos(pos)
+        return self.lemmatizer.lemmatize(token, wordnet_pos)
     
     def _basic_cleaning(self, text: str) -> str:
         """Basic text cleaning without NLTK"""
