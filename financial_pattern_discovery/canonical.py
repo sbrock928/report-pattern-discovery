@@ -246,8 +246,19 @@ class CanonicalNameGenerator:
         
         # Enhanced direct financial term patterns with amount type distinctions
         direct_financial_patterns = [
+            # More specific servicer fee patterns first - handle both "servicer" and "servicing"
+            (r'\bbackup\s+servicing\s+fee\b', 'backup_servicing_fee'),
+            (r'\bbackup\s+servicer\s+fee\b', 'backup_servicer_fee'),
             (r'\bservicing\s+fee\b', 'servicing_fee'),
+            (r'\bservicing\s+fees\b', 'servicing_fees'),
+            
+            # Other trustee and fee patterns
+            (r'\bbackup\s+trustee\s+fee\b', 'backup_trustee_fee'),
             (r'\btrustee\s+fees?\b', 'trustee_fees'),
+            (r'\bindenture\s+trustee\s+fee\b', 'indenture_trustee_fee'),
+            (r'\bowner\s+trustee\s+fee\b', 'owner_trustee_fee'),
+            
+            # Fund and reserve patterns
             (r'\bavailable\s+funds\b', 'available_funds'),
             (r'\breserve\s+fund\b', 'reserve_fund'),
             (r'\bpool\s+factor\b', 'pool_factor'),
