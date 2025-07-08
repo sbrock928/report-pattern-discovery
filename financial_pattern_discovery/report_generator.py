@@ -5,6 +5,7 @@ Excel report generation module for Financial Pattern Discovery System
 import logging
 from pathlib import Path
 from typing import Dict, Any
+from datetime import datetime
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side

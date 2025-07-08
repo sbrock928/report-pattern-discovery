@@ -1,54 +1,125 @@
 """
-Excel term extraction module for Financial Pattern Discovery System
+Enhanced Excel term extraction module with NLTK integration
 """
 
 import re
 import logging
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Dict, Tuple
 from openpyxl import load_workbook
+
+# NLTK imports with graceful fallback
+try:
+    import nltk
+    from nltk.tokenize import word_tokenize, sent_tokenize
+    from nltk.corpus import stopwords
+    from nltk.stem import WordNetLemmatizer
+    from nltk.tag import pos_tag
+    from nltk.chunk import ne_chunk
+    from nltk.tree import Tree
+    NLTK_AVAILABLE = True
+except ImportError:
+    NLTK_AVAILABLE = False
 
 from .config import ProcessingConfig, FinancialTerms
 
 
-class FinancialTermExtractor:
-    """Extract and preprocess financial terms from Excel files"""
+class NLTKDownloadManager:
+    """Manage NLTK data downloads with offline support"""
+    
+    def __init__(self):
+        self.required_data = [
+            'punkt', 'stopwords', 'wordnet', 'averaged_perceptron_tagger', 
+            'maxent_ne_chunker', 'words', 'omw-1.4'
+        ]
+        self.available_data = set()
+        
+    def ensure_nltk_data(self) -> bool:
+        """Check for existing NLTK data without downloading"""
+        if not NLTK_AVAILABLE:
+            return False
+            
+        try:
+            # Only check for existing data, don't try to download
+            for data_name in self.required_data:
+                try:
+                    # Try to find existing data first
+                    if data_name == 'punkt':
+                        nltk.data.find('tokenizers/punkt')
+                    elif data_name in ['stopwords', 'wordnet', 'words', 'omw-1.4']:
+                        nltk.data.find(f'corpora/{data_name}')
+                    elif data_name == 'averaged_perceptron_tagger':
+                        nltk.data.find('taggers/averaged_perceptron_tagger')
+                    elif data_name == 'maxent_ne_chunker':
+                        nltk.data.find('chunkers/maxent_ne_chunker')
+                    
+                    self.available_data.add(data_name)
+                    
+                except LookupError:
+                    # Data not found, but don't try to download in corporate environment
+                    continue
+                        
+                except Exception:
+                    # Data exists but can't be loaded - still count as available
+                    continue
+            
+            # Return True if we have at least the essential components
+            essential_data = {'punkt', 'stopwords', 'wordnet'}
+            available_essential = len(essential_data.intersection(self.available_data))
+            
+            if available_essential > 0:
+                print(f"NLTK: Found {available_essential}/3 essential packages: {essential_data.intersection(self.available_data)}")
+                return True
+            else:
+                print("NLTK: No essential data found. Use 'python scripts/setup_nltk_manual.py' for setup instructions.")
+                return False
+            
+        except Exception as e:
+            print(f"NLTK: Initialization failed: {e}")
+            return False
+
+
+class EnhancedFinancialTermExtractor:
+    """NLTK-enhanced financial term extractor"""
     
     def __init__(self, config: ProcessingConfig):
         self.config = config
         self.financial_terms = FinancialTerms()
         self.logger = logging.getLogger(__name__)
         
-        # Built-in stopwords list (no NLTK required)
-        self.stop_words = {
-            'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 
-            'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself',
-            'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them',
-            'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this',
-            'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been',
-            'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
-            'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until',  # Removed 'a'
-            'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between',
-            'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to',
-            'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
-            'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how',
-            'all', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such',
-            'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
-            's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'd', 'll', 'm',
-            'o', 're', 've', 'y', 'ain', 'aren', 'couldn', 'didn', 'doesn', 'hadn',
-            'hasn', 'haven', 'isn', 'ma', 'mightn', 'mustn', 'needn', 'shan', 'shouldn',
-            'wasn', 'weren', 'won', 'wouldn'
-        }
+        # Initialize NLTK components
+        self.nltk_manager = NLTKDownloadManager()
+        self.nltk_ready = self.nltk_manager.ensure_nltk_data()
         
-        # Remove financial terms and class identifiers from stopwords
-        financial_stop_words = {'annual', 'quarterly', 'monthly', 'total', 'gross', 'net'}
-        class_identifiers = {'a', 'b', 'c', 'd', 'e', 'f'}  # Important class letters
-        self.stop_words = self.stop_words - financial_stop_words - class_identifiers
+        if self.nltk_ready:
+            self.lemmatizer = WordNetLemmatizer()
+            self.stop_words = set(stopwords.words('english'))
+            # Remove financial terms from NLTK stopwords
+            financial_keepers = {'fee', 'tax', 'a', 'b', 'c', 'd', 'e', 'f', 'interest', 'principal'}
+            self.stop_words = self.stop_words - financial_keepers
+            self.logger.info("NLTK components initialized successfully")
+        else:
+            # Fallback to basic stopwords
+            self.stop_words = {
+                'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 
+                'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself',
+                'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them',
+                'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this',
+                'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been',
+                'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+                'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until',
+                'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between',
+                'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to',
+                'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
+                'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how',
+                'all', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such',
+                'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very'
+            }
+            self.logger.warning("NLTK not available, using basic text processing")
         
     def extract_headers_from_excel(self, file_path: Path) -> List[dict]:
-        """Extract header/label cells from Excel file with location information"""
+        """Extract header/label cells from Excel file with enhanced NLTK processing"""
         try:
-            # Try reading with openpyxl for better format detection
             workbook = load_workbook(file_path, read_only=True)
             headers = []
             file_stats = {
@@ -64,7 +135,6 @@ class FinancialTermExtractor:
                     sheet_headers = self._extract_headers_from_sheet(sheet, sheet_name, file_path)
                     headers.extend(sheet_headers)
                     
-                    # Collect sheet statistics
                     file_stats['sheets'][sheet_name] = {
                         'max_row': sheet.max_row,
                         'max_column': sheet.max_column,
@@ -82,17 +152,12 @@ class FinancialTermExtractor:
             file_stats['total_max_columns'] = max([stats['max_column'] for stats in file_stats['sheets'].values()]) if file_stats['sheets'] else 0
             file_stats['total_headers_found'] = len(headers)
             
-            # Remove duplicates while preserving location info for the first occurrence
-            seen_terms = {}
-            unique_headers = []
+            # Enhanced deduplication with NLTK lemmatization
+            unique_headers = self._deduplicate_with_lemmatization(headers)
             
-            for header_info in headers:
-                term = header_info['term']
-                if term not in seen_terms:
-                    seen_terms[term] = True
-                    # Add file statistics to each header info
-                    header_info['file_stats'] = file_stats
-                    unique_headers.append(header_info)
+            # Add file statistics to each header
+            for header_info in unique_headers:
+                header_info['file_stats'] = file_stats
             
             return unique_headers
             
@@ -101,17 +166,16 @@ class FinancialTermExtractor:
             return []
     
     def _extract_headers_from_sheet(self, sheet, sheet_name: str, file_path: Path) -> List[dict]:
-        """Extract headers from a specific sheet with location information"""
+        """Extract headers from sheet with enhanced financial context detection"""
         headers = []
-        # Scan more rows to find financial terms throughout the document
-        max_rows = min(200, sheet.max_row)  # Increased from 20 to 200 rows
+        max_rows = min(200, sheet.max_row)
         
         for row_idx in range(1, max_rows + 1):
             row = sheet[row_idx]
             
             for cell in row:
-                if self._is_header_cell(cell):
-                    cleaned_text = self._clean_financial_text(str(cell.value))
+                if self._is_enhanced_header_cell(cell):
+                    cleaned_text = self._enhanced_clean_financial_text(str(cell.value))
                     if cleaned_text and len(cleaned_text) > 2:
                         header_info = {
                             'term': cleaned_text,
@@ -128,138 +192,179 @@ class FinancialTermExtractor:
         
         return headers
     
-    def _is_header_cell(self, cell) -> bool:
-        """Determine if a cell contains header/label text"""
+    def _is_enhanced_header_cell(self, cell) -> bool:
+        """Enhanced header detection using NLTK"""
         if not cell.value or not isinstance(cell.value, str):
             return False
             
         text = str(cell.value).strip()
         
-        # Skip if too short or too long
-        if len(text) < 3 or len(text) > 200:  # Increased max length to capture more complete headers
+        if len(text) < 3 or len(text) > 200:
             return False
             
-        # Skip if mostly numbers (but allow some numbers for class identifiers)
+        # Enhanced number filtering
         number_ratio = len(re.findall(r'\d', text)) / len(text)
-        if number_ratio > 0.7:  # Allow up to 70% numbers (was 100% before)
+        if number_ratio > 0.7:
             return False
+        
+        # NLTK-enhanced financial term detection
+        if self.nltk_ready:
+            financial_score = self._calculate_financial_score_nltk(text)
+            if financial_score > 0.3:  # Threshold for financial relevance
+                return True
+        
+        # Fallback to pattern-based detection
+        return self._pattern_based_header_detection(text)
+    
+    def _calculate_financial_score_nltk(self, text: str) -> float:
+        """Calculate financial relevance score using NLTK"""
+        try:
+            # Tokenize and POS tag
+            tokens = word_tokenize(text.lower())
+            pos_tags = pos_tag(tokens)
             
-        # Enhanced financial terminology detection
+            score = 0.0
+            total_tokens = len(tokens)
+            
+            if total_tokens == 0:
+                return 0.0
+            
+            # Score based on financial keywords
+            financial_keywords = {
+                'balance', 'amount', 'payment', 'fee', 'rate', 'interest', 'principal',
+                'collection', 'distribution', 'outstanding', 'aggregate', 'eligible',
+                'contract', 'loan', 'note', 'servicer', 'dealer', 'purchased',
+                'reserve', 'account', 'funds', 'available', 'allocation', 'period',
+                'class', 'tranche', 'series', 'tier', 'beginning', 'ending',
+                'carryover', 'shortfall', 'distributable', 'deficiency'
+            }
+            
+            financial_token_count = sum(1 for token, _ in pos_tags if token in financial_keywords)
+            score += (financial_token_count / total_tokens) * 0.8
+            
+            # Bonus for noun phrases (likely to be financial concepts)
+            noun_count = sum(1 for _, pos in pos_tags if pos.startswith('NN'))
+            score += (noun_count / total_tokens) * 0.3
+            
+            # Bonus for class identifiers
+            if any(token in ['class', 'tranche'] for token, _ in pos_tags):
+                score += 0.4
+            
+            # Named Entity Recognition bonus
+            try:
+                chunked = ne_chunk(pos_tags)
+                has_named_entities = any(isinstance(chunk, Tree) for chunk in chunked)
+                if has_named_entities:
+                    score += 0.2
+            except:
+                pass
+            
+            return min(score, 1.0)
+            
+        except Exception as e:
+            self.logger.debug(f"NLTK scoring failed for '{text}': {e}")
+            return 0.0
+    
+    def _pattern_based_header_detection(self, text: str) -> bool:
+        """Fallback pattern-based header detection"""
         financial_keywords = [
-            # Core financial terms
             'balance', 'amount', 'payment', 'fee', 'rate', 'interest', 'principal',
             'collection', 'distribution', 'outstanding', 'aggregate', 'eligible',
             'contract', 'loan', 'note', 'servicer', 'dealer', 'purchased',
             'reserve', 'account', 'funds', 'available', 'allocation', 'period',
-            'beginning', 'ending', 'date', 'determination', 'closing', 'cut',
-            'delinquent', 'default', 'loss', 'charge', 'write', 'prepayment',
-            'advance', 'excess', 'carryover', 'factor', 'pool', 'waterfall',
-            
-            # Class-specific terms (key addition)
-            'class', 'tranche', 'series', 'tier',
-            
-            # Additional structured finance terms
-            'subordinate', 'senior', 'mezzanine', 'equity', 'residual',
-            'enhancement', 'support', 'overcollateralization', 'coverage',
-            'trigger', 'threshold', 'target', 'floor', 'cap', 'spread',
-            'margin', 'basis', 'points', 'yield', 'coupon', 'accrual',
-            'amortization', 'maturity', 'weighted', 'average', 'life'
+            'class', 'tranche', 'series', 'tier', 'beginning', 'ending'
         ]
         
         text_lower = text.lower()
-        
-        # Check if text contains financial keywords
-        for keyword in financial_keywords:
-            if keyword in text_lower:
-                return True
-        
-        # Enhanced class-based pattern detection
-        class_patterns = [
-            r'class\s*[a-z]\s*\w+',  # "class a interest", "class b notes"
-            r'class\s*[a-z]$',       # "class a"
-            r'series\s*\w+',         # "series 2024-1"
-            r'tranche\s*[a-z]',      # "tranche a"
-            r'tier\s*\d+',           # "tier 1"
-        ]
-        
-        for pattern in class_patterns:
-            if re.search(pattern, text_lower):
-                return True
-        
-        # Check for financial terminology patterns
-        for pattern in self.financial_terms.financial_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-        
-        # Enhanced header patterns
-        header_patterns = [
-            r'^\w+\s+(fee|rate|amount|balance|income|expense)',
-            r'^(total|net|gross|current|long.term)',
-            r'^(description|account|code|reference|date)',
-            r'outstanding.*balance',
-            r'aggregate.*amount',
-            r'eligible.*contract',
-            r'class\s+[a-z]\s+',
-            r'beginning.*period',
-            r'end.*period',
-            r'collection.*period',
-            r'distribution.*date',
-            
-            # Additional structured patterns
-            r'\w+.*interest.*\w+',
-            r'\w+.*balance.*\w+',
-            r'\w+.*amount.*\w+',
-            r'accrued.*\w+',
-            r'available.*\w+',
-            r'required.*\w+',
-        ]
-        
-        for pattern in header_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-        
-        return False
+        return any(keyword in text_lower for keyword in financial_keywords)
     
-    def _clean_financial_text(self, text: str) -> str:
-        """Clean and normalize financial text"""
+    def _enhanced_clean_financial_text(self, text: str) -> str:
+        """Enhanced text cleaning using NLTK"""
         if not text:
             return ""
-            
-        # Convert to lowercase
+        
+        # Basic cleaning
         text = text.lower().strip()
-        
-        # Remove percentage values and their patterns
-        text = re.sub(r'\d+\.?\d*\s*%', '', text)  # Remove "4.12%", "5.83%", etc.
-        text = re.sub(r'\d+\.?\d*\s*percent', '', text)  # Remove "4.12 percent"
-        
-        # Remove other numeric values that aren't meaningful for categorization
-        text = re.sub(r'\$[\d,]+\.?\d*', '', text)  # Remove dollar amounts
-        text = re.sub(r'\b\d{1,2}/\d{1,2}/\d{2,4}\b', '', text)  # Remove dates
-        text = re.sub(r'\b\d+\.\d+\b', '', text)  # Remove decimal numbers
-        text = re.sub(r'\b\d{4,}\b', '', text)  # Remove large numbers (years, IDs, etc.)
-        
-        # Remove parentheses and their contents (often numbers or codes)
+        text = re.sub(r'\d+\.?\d*\s*%', '', text)
+        text = re.sub(r'\$[\d,]+\.?\d*', '', text)
+        text = re.sub(r'\b\d{1,2}/\d{1,2}/\d{2,4}\b', '', text)
         text = re.sub(r'\([^)]*\)', '', text)
-        
-        # Remove numbers at the beginning (like {1}, {2}, etc.)
         text = re.sub(r'^\{\d+\}\s*', '', text)
-        
-        # Remove trailing colons and excessive punctuation
         text = re.sub(r'[:\.,;]+$', '', text)
         
-        # Remove common prefixes/suffixes but keep important ones
-        text = re.sub(r'\b(the|was|were|equal|to|of|in|at|on|for|with|by)\b', '', text)
-        
-        # Normalize separators first
+        if self.nltk_ready:
+            return self._nltk_enhanced_cleaning(text)
+        else:
+            return self._basic_cleaning(text)
+    
+    def _nltk_enhanced_cleaning(self, text: str) -> str:
+        """NLTK-powered text cleaning with lemmatization"""
+        try:
+            # Tokenize
+            tokens = word_tokenize(text)
+            
+            # POS tagging to preserve important terms
+            pos_tags = pos_tag(tokens)
+            
+            # Lemmatize while preserving financial terms
+            cleaned_tokens = []
+            financial_preserve = {'fees', 'balances', 'amounts', 'payments', 'interests', 'principals'}
+            
+            for token, pos in pos_tags:
+                # Skip very short words except important class identifiers
+                if len(token) < 2 and token not in {'a', 'b', 'c', 'd', 'e', 'f'}:
+                    continue
+                
+                # Skip stopwords except financial terms
+                if token in self.stop_words:
+                    continue
+                
+                # Lemmatize if not a special financial term
+                if token not in financial_preserve:
+                    # Convert POS tag to WordNet format
+                    wordnet_pos = self._get_wordnet_pos(pos)
+                    lemmatized = self.lemmatizer.lemmatize(token, wordnet_pos)
+                    cleaned_tokens.append(lemmatized)
+                else:
+                    cleaned_tokens.append(token)
+            
+            # Remove consecutive duplicates
+            deduplicated = []
+            prev_token = None
+            for token in cleaned_tokens:
+                if token != prev_token:
+                    deduplicated.append(token)
+                prev_token = token
+            
+            return ' '.join(deduplicated)
+            
+        except Exception as e:
+            self.logger.debug(f"NLTK cleaning failed: {e}")
+            return self._basic_cleaning(text)
+    
+    def _get_wordnet_pos(self, treebank_tag: str) -> str:
+        """Convert TreeBank POS tag to WordNet POS tag"""
+        if treebank_tag.startswith('J'):
+            return 'a'  # adjective
+        elif treebank_tag.startswith('V'):
+            return 'v'  # verb
+        elif treebank_tag.startswith('N'):
+            return 'n'  # noun
+        elif treebank_tag.startswith('R'):
+            return 'r'  # adverb
+        else:
+            return 'n'  # default to noun
+    
+    def _basic_cleaning(self, text: str) -> str:
+        """Basic text cleaning without NLTK"""
+        # Normalize separators
         text = re.sub(r'[_\-\s]+', ' ', text)
-        
-        # Remove extra whitespace
         text = re.sub(r'\s+', ' ', text).strip()
         
-        # Simple tokenization without NLTK
+        # Simple tokenization
         words = text.split()
         
-        # Remove stopwords and very short words, but keep important financial terms
+        # Remove stopwords and filter
         financial_keepers = {'fee', 'tax', 'ytd', 'apr', 'apy', 'cpr', 'psa', 'a', 'b', 'c', 'd', 'e', 'f'}
         cleaned_words = []
         
@@ -267,13 +372,54 @@ class FinancialTermExtractor:
             if (len(word) > 2 or word in financial_keepers) and word not in self.stop_words:
                 cleaned_words.append(word)
         
-        # Remove duplicate consecutive words (this fixes "class class class" issues)
-        deduplicated_words = []
+        # Remove consecutive duplicates
+        deduplicated = []
         prev_word = None
-        
         for word in cleaned_words:
             if word != prev_word:
-                deduplicated_words.append(word)
+                deduplicated.append(word)
             prev_word = word
         
-        return ' '.join(deduplicated_words)
+        return ' '.join(deduplicated)
+    
+    def _deduplicate_with_lemmatization(self, headers: List[dict]) -> List[dict]:
+        """Smart deduplication using NLTK lemmatization"""
+        if not self.nltk_ready:
+            # Fallback to simple deduplication
+            seen_terms = {}
+            unique_headers = []
+            for header_info in headers:
+                term = header_info['term']
+                if term not in seen_terms:
+                    seen_terms[term] = True
+                    unique_headers.append(header_info)
+            return unique_headers
+        
+        # NLTK-enhanced deduplication
+        seen_lemmatized = {}
+        unique_headers = []
+        
+        for header_info in headers:
+            term = header_info['term']
+            
+            # Create lemmatized signature for comparison
+            try:
+                tokens = word_tokenize(term.lower())
+                lemmatized_tokens = [self.lemmatizer.lemmatize(token) for token in tokens]
+                lemmatized_signature = ' '.join(sorted(lemmatized_tokens))
+                
+                if lemmatized_signature not in seen_lemmatized:
+                    seen_lemmatized[lemmatized_signature] = True
+                    unique_headers.append(header_info)
+                    
+            except Exception as e:
+                # Fallback to exact matching
+                if term not in seen_lemmatized:
+                    seen_lemmatized[term] = True
+                    unique_headers.append(header_info)
+        
+        return unique_headers
+
+
+# Maintain backward compatibility
+FinancialTermExtractor = EnhancedFinancialTermExtractor

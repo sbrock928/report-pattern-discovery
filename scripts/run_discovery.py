@@ -16,7 +16,7 @@ from financial_pattern_discovery import FinancialPatternDiscovery
 # =============================================================================
 SOURCE_DIRECTORIES = [str(Path(__file__).parent.parent / "reports")]  # Points to the reports subfolder
 SOURCE_FILES = []                                   # List of specific files to process (optional)
-OUTPUT_FILE = "financial_patterns.xlsx"            # Output report file
+OUTPUT_FILE = None                                  # Output report file (None = auto-generate with timestamp)
 FILE_PATTERN = "*.xlsx"                            # File pattern to match
 RECURSIVE = True                                   # Process directories recursively
 CONFIG_FILE = "config.ini"                        # Configuration file to use
@@ -121,17 +121,20 @@ def main():
     
     # Process files
     try:
-        output_path = Path(OUTPUT_FILE)
+        output_path = Path(OUTPUT_FILE) if OUTPUT_FILE else None
         results = discoverer.process_files(file_paths, output_path)
         
         if results:
+            # Get the actual output filename from the results or use the passed output_path
+            actual_output = results.get('output_file', output_path)
+            
             print(f"\n✅ Pattern Discovery Complete!")
             print(f"📊 Files processed: {results['total_files']}")
             print(f"📝 Terms extracted: {results['total_terms']} ({results['unique_terms']} unique)")
             print(f"🎯 Clusters found: {results['n_clusters']}")
             print(f"✨ High-confidence mappings: {results['high_confidence_count']}")
             print(f"⏱️  Processing time: {results['processing_time']:.2f} seconds")
-            print(f"\n📄 Report saved to: {output_path}")
+            print(f"\n📄 Report saved to: {actual_output}")
             
             return 0
         else:

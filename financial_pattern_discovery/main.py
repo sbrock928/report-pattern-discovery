@@ -7,6 +7,7 @@ import logging
 import configparser
 from pathlib import Path
 from typing import Dict, List, Any
+from datetime import datetime
 
 import numpy as np
 from tqdm import tqdm
@@ -135,7 +136,9 @@ class FinancialPatternDiscovery:
         
         # Create output path if not provided
         if output_path is None:
-            output_path = Path(f"financial_patterns_{int(time.time())}.xlsx")
+            # Create timestamped filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = Path(f"financial_patterns_{timestamp}.xlsx")
         
         # Step 1: Extract terms from all files
         self.logger.info("Extracting financial terms from Excel files...")
@@ -233,7 +236,8 @@ class FinancialPatternDiscovery:
             'canonical_names': canonical_names,
             'mappings': mappings,
             'file_term_mapping': file_term_mapping,
-            'file_statistics': file_statistics  # Include file statistics in results
+            'file_statistics': file_statistics,  # Include file statistics in results
+            'output_file': output_path  # Add the actual output filename to results
         }
         
         # Step 6: Generate report

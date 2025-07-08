@@ -324,16 +324,38 @@ class CanonicalNameGenerator:
                 components['amount_type'] = amount_type
                 break
 
-        # Extract instrument types
-        instrument_patterns = [
-            (r'\b(note|certificate|bond|security)\b', None),
-            (r'\b(principal|interest)\b', None),
-        ]
+        # FIXED: Extract instrument types with proper principal/interest distinction
+        # Check for principal vs interest with more specific logic
+        principal_count = len(re.findall(r'\bprincipal\b', all_text))
+        interest_count = len(re.findall(r'\binterest\b', all_text))
         
-        for pattern, _ in instrument_patterns:
-            match = re.search(pattern, all_text)
-            if match and not components['instrument']:
-                components['instrument'] = match.group(1)
+        # Determine which is more dominant in this cluster
+        if principal_count > interest_count:
+            components['instrument'] = 'principal'
+        elif interest_count > principal_count:
+            components['instrument'] = 'interest'
+        elif principal_count > 0 and interest_count > 0:
+            # If equal, check which appears in more individual terms
+            principal_terms = len([term for term in terms if 'principal' in term.lower()])
+            interest_terms = len([term for term in terms if 'interest' in term.lower()])
+            
+            if principal_terms > interest_terms:
+                components['instrument'] = 'principal'
+            elif interest_terms > principal_terms:
+                components['instrument'] = 'interest'
+            # If still tied, don't set instrument to avoid confusion
+        
+        # Check for other instrument types if no principal/interest dominance
+        if not components['instrument']:
+            other_instrument_patterns = [
+                (r'\b(note|certificate|bond|security)\b', None),
+            ]
+            
+            for pattern, _ in other_instrument_patterns:
+                match = re.search(pattern, all_text)
+                if match:
+                    components['instrument'] = match.group(1)
+                    break
         
         # Extract financial actions/operations
         action_patterns = [
