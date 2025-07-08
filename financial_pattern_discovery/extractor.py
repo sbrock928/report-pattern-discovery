@@ -461,6 +461,41 @@ class EnhancedFinancialTermExtractor:
                     unique_headers.append(header_info)
         
         return unique_headers
+    
+    def _pattern_based_header_detection(self, text: str) -> bool:
+        """Pattern-based header detection fallback"""
+        # Financial term patterns
+        financial_patterns = [
+            r'\b(principal|interest|fee|rate|amount|balance|payment)\b',
+            r'\b(class|tranche|series|tier)\s*[a-f]?\b',
+            r'\b(current|outstanding|remaining|total)\b',
+            r'\b(servicer|trustee|issuer|originator)\b',
+            r'\b(pool|collateral|asset|security)\b',
+            r'\b(distribution|collection|advance)\b',
+            r'\b(delinquent|default|loss|recovery)\b',
+            r'\b(enhancement|subordination|overcollateralization)\b',
+            r'\b(waterfall|trigger|step|down)\b',
+            r'\b(note|certificate|bond|security)\b'
+        ]
+        
+        for pattern in financial_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+                
+        return False
+    
+    def _get_wordnet_pos(self, treebank_pos: str) -> str:
+        """Convert TreeBank POS tags to WordNet POS tags"""
+        if treebank_pos.startswith('J'):
+            return 'a'  # adjective
+        elif treebank_pos.startswith('V'):
+            return 'v'  # verb
+        elif treebank_pos.startswith('N'):
+            return 'n'  # noun
+        elif treebank_pos.startswith('R'):
+            return 'r'  # adverb
+        else:
+            return 'n'  # default to noun
 
 
 # Maintain backward compatibility
