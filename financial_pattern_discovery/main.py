@@ -81,7 +81,9 @@ class FinancialPatternDiscovery:
                     output_format=processing_section.get('output_format', 'xlsx'),
                     temp_dir=Path(processing_section.get('temp_dir', './temp')),
                     fuzzy_threshold=int(processing_section.get('fuzzy_threshold', 80)),
-                    memory_threshold=float(processing_section.get('memory_threshold', 0.8))
+                    memory_threshold=float(processing_section.get('memory_threshold', 0.8)),
+                    exclude_generic_canonicals=processing_section.get('exclude_generic_canonicals', 'true').lower() == 'true',
+                    exclude_low_priority_canonicals=processing_section.get('exclude_low_priority_canonicals', 'true').lower() == 'true'
                 )
             else:
                 self.processing_config = ProcessingConfig()
@@ -140,6 +142,7 @@ class FinancialPatternDiscovery:
         all_terms = []
         all_term_info = []
         file_term_mapping = {}
+        file_statistics = {}  # New: collect file statistics
         
         progress_bar = tqdm(file_paths, desc="Processing files")
         
@@ -152,6 +155,11 @@ class FinancialPatternDiscovery:
                     all_terms.extend(terms)
                     all_term_info.extend(term_info_list)
                     file_term_mapping[str(file_path)] = term_info_list
+                    
+                    # Collect file statistics from the first term info (all have same file_stats)
+                    if term_info_list and 'file_stats' in term_info_list[0]:
+                        file_statistics[str(file_path)] = term_info_list[0]['file_stats']
+                    
                     progress_bar.set_postfix({"Terms extracted": len(terms)})
                 else:
                     self.logger.warning(f"No terms extracted from {file_path.name}")
@@ -224,7 +232,8 @@ class FinancialPatternDiscovery:
             'clusters': clustering_results['clusters'],
             'canonical_names': canonical_names,
             'mappings': mappings,
-            'file_term_mapping': file_term_mapping
+            'file_term_mapping': file_term_mapping,
+            'file_statistics': file_statistics  # Include file statistics in results
         }
         
         # Step 6: Generate report

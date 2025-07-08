@@ -4,6 +4,7 @@ Fuzzy matching module for Financial Pattern Discovery System
 
 import logging
 from typing import Dict, List, Any
+import re
 
 from rapidfuzz import process, fuzz
 
@@ -25,6 +26,11 @@ class FuzzyMatcher:
         
         for cluster_id, cluster_data in clusters.items():
             canonical_name = canonical_names[cluster_id]
+            
+            # Skip clusters with excluded or low-priority canonical names
+            if self._should_exclude_canonical_name(canonical_name):
+                self.logger.info(f"Excluding cluster {cluster_id} with generic canonical name: '{canonical_name}'")
+                continue
             
             for term in cluster_data['terms']:
                 # Calculate confidence based on how well the term matches the canonical name
@@ -67,6 +73,16 @@ class FuzzyMatcher:
         if canonical_name.replace('_', ' ') in term.lower():
             direct_score = min(100, direct_score + 15)
         
+        # Enhanced class-specific matching
+        if 'class_' in canonical_name:
+            # Extract class letter from canonical name
+            class_match = re.search(r'class_([a-f])', canonical_name)
+            if class_match:
+                class_letter = class_match.group(1)
+                # Check if term contains this class
+                if f'class {class_letter}' in term.lower() or f'class{class_letter}' in term.lower():
+                    direct_score = min(100, direct_score + 25)  # Significant boost for class match
+        
         # If the cluster is large and this term is representative, boost confidence
         if cluster_data['count'] > 3:
             # Check if this term appears in the top features
@@ -88,3 +104,24 @@ class FuzzyMatcher:
             return 'medium'
         else:
             return 'low'
+    
+    def _should_exclude_canonical_name(self, canonical_name: str) -> bool:
+        """Check if a canonical name should be excluded from final output"""
+        if not canonical_name:
+            return True
+            
+        # Always exclude unknown clusters
+        if canonical_name == 'unknown_cluster':
+            return True
+            
+        # Check configuration for excluding generic names
+        if self.config.exclude_generic_canonicals:
+            if canonical_name.startswith('excluded_generic_'):
+                return True
+        
+        # Check configuration for excluding low priority names
+        if self.config.exclude_low_priority_canonicals:
+            if canonical_name.startswith('low_priority_'):
+                return True
+            
+        return False

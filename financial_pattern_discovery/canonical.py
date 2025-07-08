@@ -16,12 +16,44 @@ class CanonicalNameGenerator:
         self.financial_terms = FinancialTerms()
         self.logger = logging.getLogger(__name__)
         
+        # Define generic terms that shouldn't become standalone canonical names
+        self.junk_canonical_names = {
+            # Generic qualifiers that aren't actual variables (keep these)
+            'net', 'total', 'gross', 'current', 'aggregate', 'outstanding',
+            'available', 'required', 'applicable', 'eligible', 'related',
+            
+            # Generic amounts/values without context (keep these)
+            'amount', 'amounts', 'value', 'values', 'sum', 'sums',
+            
+            # Temporal terms alone (keep these)
+            'beginning', 'ending', 'period', 'date', 'time',
+            'start', 'end', 'initial', 'final', 'opening', 'closing',
+            
+            # Generic descriptors (keep these)
+            'other', 'additional', 'miscellaneous', 'various', 'general',
+            'standard', 'regular', 'normal', 'special', 'extra',
+            
+            # Single letters or very short terms (keep these)
+            'a', 'b', 'c', 'd', 'e', 'f', 'i', 'ii', 'iii'
+            
+            # REMOVED: 'principal', 'interest', 'balance', 'payment', 'income',
+            # 'expense', 'cost', 'fee', 'charge', 'rate', 'factor',
+            # 'account', 'fund', 'pool', 'reserve', 'trust'
+            # These can be meaningful when combined with class identifiers
+        }
+        
     def generate_canonical_names(self, clusters: Dict[int, Dict[str, Any]]) -> Dict[int, str]:
         """Generate canonical names for all clusters"""
         canonical_names = {}
         
         for cluster_id, cluster_data in clusters.items():
             canonical_name = self._generate_single_canonical_name(cluster_data['terms'])
+            
+            # Filter out junk canonical names
+            if self._is_junk_canonical_name(canonical_name):
+                # Try to create a better name or mark for exclusion
+                canonical_name = self._create_better_canonical_name(cluster_data['terms'], canonical_name)
+                
             canonical_names[cluster_id] = canonical_name
             
         # Post-process to ensure essential financial terms get proper canonical names
@@ -29,37 +61,92 @@ class CanonicalNameGenerator:
             
         return canonical_names
     
-    def _ensure_essential_financial_terms(self, clusters: Dict[int, Dict[str, Any]], canonical_names: Dict[int, str]) -> Dict[int, str]:
-        """Ensure essential financial terms have dedicated canonical names"""
-        
-        # Essential financial term patterns and their canonical names
-        essential_patterns = {
-            r'\bservicing\s+fee\b': 'servicing_fee',
-            r'\bbackup\s+servicing\s+fees?\b': 'backup_servicing_fees', 
-            r'\bindenture\s+trustee\s+fees?\b': 'indenture_trustee_fees',
-            r'\bowner\s+trustee\s+fees?\b': 'owner_trustee_fees',
-            r'\btrustee\s+fees?\b': 'trustee_fees',
-            r'\binvestment\s+earnings\b': 'investment_earnings',
-            r'\breserve\s+fund\b': 'reserve_fund',
-            r'\bavailable\s+funds\b': 'available_funds',
-            r'\bpool\s+factor\b': 'pool_factor',
-            r'\badvance\s+rates?\b': 'advance_rates',
-            r'\bovercollateralization\b': 'overcollateralization',
-            r'\bwaterfall\b': 'waterfall',
-        }
-        
-        # Find clusters containing essential terms and assign proper canonical names
-        for cluster_id, cluster_data in clusters.items():
-            terms_text = ' '.join(cluster_data['terms']).lower()
+    def _is_junk_canonical_name(self, canonical_name: str) -> bool:
+        """Check if a canonical name is too generic to be useful"""
+        if not canonical_name or canonical_name == "unknown_cluster":
+            return True
             
-            for pattern, canonical_name in essential_patterns.items():
-                if re.search(pattern, terms_text):
-                    # Override the canonical name for this cluster
-                    canonical_names[cluster_id] = canonical_name
-                    self.logger.info(f"Assigned essential financial term canonical name: {canonical_name}")
-                    break  # Use the first match found
-                    
-        return canonical_names
+        # Split the canonical name into parts
+        parts = canonical_name.split('_')
+        
+        # NEVER consider class-specific terms as junk
+        if any(part.startswith('class_') for part in parts):
+            return False
+            
+        # NEVER consider tranche-specific terms as junk  
+        if any(part.startswith('tranche_') for part in parts):
+            return False
+            
+        # Check if it's a single generic term (but allow some financial terms)
+        if len(parts) == 1:
+            single_term = parts[0]
+            # These single terms are always junk
+            always_junk = {'net', 'total', 'gross', 'current', 'amount', 'value', 'sum',
+                          'beginning', 'ending', 'period', 'date', 'time', 'other', 'additional',
+                          'a', 'b', 'c', 'd', 'e', 'f', 'i', 'ii', 'iii'}
+            if single_term in always_junk:
+                return True
+                
+            # Allow single financial terms that have meaning
+            meaningful_single_terms = {'interest', 'principal', 'balance', 'fee', 'payment', 
+                                     'income', 'expense', 'cost', 'rate', 'factor', 'account',
+                                     'fund', 'pool', 'reserve', 'trust', 'servicing', 'trustee'}
+            if single_term in meaningful_single_terms:
+                return False
+        
+        # Check if it's entirely composed of very generic terms
+        very_generic = {'amount', 'total', 'net', 'gross', 'current', 'value', 'sum',
+                       'beginning', 'ending', 'period', 'date', 'time'}
+        if all(part in very_generic for part in parts):
+            return True
+            
+        # Check if less than 30% of parts are meaningful (was 50%, now more lenient)
+        non_junk_parts = [part for part in parts if part not in self.junk_canonical_names]
+        if len(non_junk_parts) < len(parts) * 0.3:
+            return True
+            
+        return False
+    
+    def _create_better_canonical_name(self, terms: List[str], original_name: str) -> str:
+        """Try to create a better canonical name for clusters with junk names"""
+        
+        # Look for specific financial patterns in the original terms
+        all_text = ' '.join(terms).lower()
+        
+        # Try to find more specific financial concepts
+        specific_patterns = [
+            (r'\b(servicing|backup|trustee|owner)\s+fee', 'specific_fee'),
+            (r'\b(investment|interest)\s+earnings', 'earnings'),
+            (r'\b(reserve|trust)\s+fund', 'fund_account'),
+            (r'\b(pool|aggregate)\s+balance', 'pool_balance'),
+            (r'\b(advance|overcollateralization)\s+rate', 'advance_rate'),
+            (r'\b(distribution|payment)\s+date', 'payment_date'),
+            (r'\b(beginning|ending)\s+period', 'period_boundary'),
+            (r'\bclass\s+[a-f]\s+', 'class_specific'),
+        ]
+        
+        for pattern, replacement in specific_patterns:
+            if re.search(pattern, all_text):
+                return replacement
+                
+        # If we still can't find a good name, check if this cluster should be excluded
+        if len(terms) == 1 and terms[0].lower().strip() in self.junk_canonical_names:
+            return f"excluded_generic_{terms[0].lower().replace(' ', '_')}"
+            
+        # Try to build from the longest meaningful term
+        meaningful_terms = []
+        for term in terms:
+            term_words = term.lower().split()
+            if len(term_words) > 1:  # Multi-word terms are often more meaningful
+                meaningful_terms.append(term)
+                
+        if meaningful_terms:
+            # Use the shortest meaningful multi-word term
+            best_term = min(meaningful_terms, key=len)
+            return self._clean_canonical_name(best_term)
+            
+        # Last resort: mark as low priority
+        return f"low_priority_{original_name}"
     
     def _generate_single_canonical_name(self, terms: List[str]) -> str:
         """Generate canonical name for a single cluster"""
@@ -119,15 +206,19 @@ class CanonicalNameGenerator:
         if concept_components['instrument']:
             canonical_parts.append(concept_components['instrument'])
         
-        # 3. Financial action/type
+        # 3. Amount type (single, specific type)
+        if concept_components['amount_type']:
+            canonical_parts.append(concept_components['amount_type'])
+        
+        # 4. Financial action/type
         if concept_components['action']:
             canonical_parts.append(concept_components['action'])
         
-        # 4. Financial concept
+        # 5. Financial concept
         if concept_components['concept']:
             canonical_parts.append(concept_components['concept'])
         
-        # 5. Temporal aspect
+        # 6. Temporal aspect
         if concept_components['temporal']:
             canonical_parts.append(concept_components['temporal'])
         
@@ -146,29 +237,21 @@ class CanonicalNameGenerator:
             'instrument': None,
             'action': None,
             'concept': None,
-            'temporal': None
+            'temporal': None,
+            'amount_type': None  # Back to single amount type to create distinct canonical names
         }
         
         # Check for direct financial terms first (highest priority)
         all_text = ' '.join(terms).lower()
         
-        # Direct financial term patterns (these get priority)
+        # Enhanced direct financial term patterns with amount type distinctions
         direct_financial_patterns = [
             (r'\bservicing\s+fee\b', 'servicing_fee'),
-            (r'\bbackup\s+servicing\s+fees?\b', 'backup_servicing_fees'),
-            (r'\bindenture\s+trustee\s+fees?\b', 'indenture_trustee_fees'),
-            (r'\bowner\s+trustee\s+fees?\b', 'owner_trustee_fees'),
             (r'\btrustee\s+fees?\b', 'trustee_fees'),
-            (r'\baccrued\s+fees?\b', 'accrued_fees'),
-            (r'\bservicing\s+fees?\b', 'servicing_fees'),
-            (r'\binvestment\s+earnings\b', 'investment_earnings'),
-            (r'\breserve\s+fund\b', 'reserve_fund'),
             (r'\bavailable\s+funds\b', 'available_funds'),
-            (r'\btotal\s+available\s+funds\b', 'total_available_funds'),
+            (r'\breserve\s+fund\b', 'reserve_fund'),
             (r'\bpool\s+factor\b', 'pool_factor'),
-            (r'\badvance\s+rates?\b', 'advance_rates'),
             (r'\bovercollateralization\b', 'overcollateralization'),
-            (r'\bwaterfall\b', 'waterfall'),
         ]
         
         # Check for direct financial terms first - if found, use them directly
@@ -177,9 +260,7 @@ class CanonicalNameGenerator:
                 # Return early with the specific financial term
                 return {'direct_financial_term': canonical_name}
         
-        # Continue with class-aware logic if no direct financial terms found
-        # With class-aware clustering, we should only have one class per cluster
-        # But check all terms to be safe
+        # Continue with enhanced class-aware logic
         class_letters = set()
         for term in terms:
             class_match = re.search(r'class\s*([a-f])\b', term.lower())
@@ -200,10 +281,6 @@ class CanonicalNameGenerator:
             
             most_common_class = max(class_counts, key=class_counts.get)
             components['class'] = most_common_class
-            
-            # This warning should be rare now
-            self.logger.warning(f"Unexpected mixed-class cluster with classes {class_letters}. "
-                              f"Using most frequent: {most_common_class}")
 
         # Extract tranche information
         tranche_letters = set()
@@ -214,21 +291,29 @@ class CanonicalNameGenerator:
         
         if len(tranche_letters) == 1:
             components['tranche'] = list(tranche_letters)[0]
-        elif len(tranche_letters) > 1:
-            # Similar logic for tranches
-            tranche_counts = {}
-            for term in terms:
-                tranche_match = re.search(r'tranche\s*([a-f])\b', term.lower())
-                if tranche_match:
-                    tranche_letter = tranche_match.group(1)
-                    tranche_counts[tranche_letter] = tranche_counts.get(tranche_letter, 0) + 1
-            
-            most_common_tranche = max(tranche_counts, key=tranche_counts.get)
-            components['tranche'] = most_common_tranche
+
+        # Extract specific amount type (prioritize more specific types)
+        amount_type_patterns = [
+            (r'\bcarryover\s+shortfall\b', 'carryover_shortfall'),  # Most specific first
+            (r'\binterest\s+carryover\s+shortfall\b', 'interest_carryover_shortfall'),
+            (r'\bprincipal\s+carryover\s+shortfall\b', 'principal_carryover_shortfall'),
+            (r'\binterest\s+distributable\s+amount\b', 'interest_distributable_amount'),
+            (r'\bprincipal\s+distributable\s+amount\b', 'principal_distributable_amount'),
+            (r'\bdistributable\s+amount\b', 'distributable_amount'),
+            (r'\bshortfall\b', 'shortfall'),
+            (r'\bdistribution\b', 'distribution'),
+            (r'\bdeficiency\b', 'deficiency'),
+            (r'\brequired\s+amount\b', 'required_amount'),
+            (r'\bpayment\s+amount\b', 'payment_amount'),
+            (r'\bcollection\s+amount\b', 'collection_amount'),
+        ]
+        
+        for pattern, amount_type in amount_type_patterns:
+            if re.search(pattern, all_text) and not components['amount_type']:
+                components['amount_type'] = amount_type
+                break
 
         # Extract instrument types
-        all_text = ' '.join(terms).lower()  # Add this line back
-        
         instrument_patterns = [
             (r'\b(note|certificate|bond|security)\b', None),
             (r'\b(principal|interest)\b', None),
@@ -241,7 +326,7 @@ class CanonicalNameGenerator:
         
         # Extract financial actions/operations
         action_patterns = [
-            (r'\b(distribution|payment|collection|allocation)\b', None),
+            (r'\b(payment|collection|allocation)\b', None),
             (r'\b(purchase|sale|transfer|exchange)\b', None),
             (r'\b(accrual|accrue|accrued)\b', 'accrued'),
             (r'\b(outstanding|aggregate|available|required)\b', None),
@@ -404,3 +489,57 @@ class CanonicalNameGenerator:
         clean_name = clean_name.strip('_')
         
         return clean_name
+    
+    def _ensure_essential_financial_terms(self, clusters: Dict[int, Dict[str, Any]], 
+                                        canonical_names: Dict[int, str]) -> Dict[int, str]:
+        """Post-process to ensure essential financial terms get proper canonical names"""
+        
+        # Essential financial patterns that should always have good names (simplified)
+        essential_patterns = {
+            'servicing_fee': [r'\bservicing\s+fee', r'\bservicing\s+fees'],
+            'trustee_fee': [r'\btrustee\s+fee', r'\bindenture\s+trustee', r'\bowner\s+trustee'],
+            'available_funds': [r'\bavailable\s+funds', r'\btotal\s+available'],
+            'reserve_fund': [r'\breserve\s+fund', r'\bcash\s+reserve'],
+            'pool_factor': [r'\bpool\s+factor', r'\bfactor'],
+            'overcollateralization': [r'\bovercollateralization', r'\boc\s+test'],
+            'waterfall': [r'\bwaterfall', r'\bpriority\s+of\s+payments'],
+        }
+        
+        # Track which essential patterns we've found
+        found_patterns = set()
+        
+        # First pass: identify clusters that contain essential financial terms (but don't override good class-specific names)
+        for cluster_id, cluster_data in clusters.items():
+            canonical_name = canonical_names[cluster_id]
+            all_text = ' '.join(cluster_data['terms']).lower()
+            
+            # Skip if this already has a good class-specific name
+            if canonical_name.startswith('class_') and not canonical_name.startswith('excluded_') and not canonical_name.startswith('low_priority_'):
+                continue
+                
+            # Check if this cluster contains essential financial terms
+            for pattern_name, regex_list in essential_patterns.items():
+                if pattern_name not in found_patterns:
+                    for regex_pattern in regex_list:
+                        if re.search(regex_pattern, all_text):
+                            # This cluster contains an essential term - ensure it has a good name
+                            if (canonical_name.startswith('excluded_') or 
+                                canonical_name.startswith('low_priority_') or 
+                                canonical_name in self.junk_canonical_names):
+                                
+                                # Check if this should be class-specific
+                                class_match = re.search(r'class\s*([a-f])\b', all_text)
+                                if class_match:
+                                    class_letter = class_match.group(1)
+                                    enhanced_name = f"class_{class_letter}_{pattern_name}"
+                                else:
+                                    enhanced_name = pattern_name
+                                    
+                                canonical_names[cluster_id] = enhanced_name
+                                self.logger.info(f"Enhanced cluster {cluster_id} canonical name to '{enhanced_name}' "
+                                               f"(was '{canonical_name}')")
+                                
+                            found_patterns.add(pattern_name)
+                            break
+        
+        return canonical_names

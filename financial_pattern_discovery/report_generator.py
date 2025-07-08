@@ -29,6 +29,7 @@ class ExcelReportGenerator:
         
         # Create sheets
         self._create_summary_sheet(workbook, results)
+        self._create_file_statistics_sheet(workbook, results)  # New tab
         self._create_cluster_details_sheet(workbook, results)
         self._create_mappings_sheet(workbook, results)
         self._create_statistics_sheet(workbook, results)
@@ -77,6 +78,73 @@ class ExcelReportGenerator:
                     pass
             
             adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+    
+    def _create_file_statistics_sheet(self, workbook: Workbook, results: Dict[str, Any]):
+        """Create file statistics sheet showing rows/columns per input file"""
+        ws = workbook.create_sheet("File Statistics")
+        
+        # File-level summary first
+        ws.cell(row=1, column=1, value="File Summary").font = Font(bold=True, size=14)
+        
+        # File summary headers
+        file_headers = ['File Name', 'Total Sheets', 'Max Rows', 'Max Columns', 'Headers Found']
+        for col, header in enumerate(file_headers, 1):
+            cell = ws.cell(row=3, column=col, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        
+        # File summary data
+        row = 4
+        for file_path, file_stats in results.get('file_statistics', {}).items():
+            file_name = Path(file_path).name
+            ws.cell(row=row, column=1, value=file_name)
+            ws.cell(row=row, column=2, value=file_stats.get('total_sheets', 0))
+            ws.cell(row=row, column=3, value=file_stats.get('total_max_rows', 0))
+            ws.cell(row=row, column=4, value=file_stats.get('total_max_columns', 0))
+            ws.cell(row=row, column=5, value=file_stats.get('total_headers_found', 0))
+            row += 1
+        
+        # Add some spacing
+        row += 2
+        
+        # Sheet-level details
+        ws.cell(row=row, column=1, value="Sheet Details").font = Font(bold=True, size=14)
+        row += 2
+        
+        # Sheet detail headers
+        sheet_headers = ['File Name', 'Sheet Name', 'Rows', 'Columns', 'Headers Found']
+        for col, header in enumerate(sheet_headers, 1):
+            cell = ws.cell(row=row, column=col, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        
+        row += 1
+        
+        # Sheet detail data
+        for file_path, file_stats in results.get('file_statistics', {}).items():
+            file_name = Path(file_path).name
+            for sheet_name, sheet_stats in file_stats.get('sheets', {}).items():
+                ws.cell(row=row, column=1, value=file_name)
+                ws.cell(row=row, column=2, value=sheet_name)
+                ws.cell(row=row, column=3, value=sheet_stats.get('max_row', 0))
+                ws.cell(row=row, column=4, value=sheet_stats.get('max_column', 0))
+                ws.cell(row=row, column=5, value=sheet_stats.get('headers_found', 0))
+                row += 1
+        
+        # Auto-adjust columns
+        for column in ws.columns:
+            max_length = 0
+            column_letter = get_column_letter(column[0].column)
+            
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            
+            adjusted_width = min(max_length + 2, 30)
             ws.column_dimensions[column_letter].width = adjusted_width
     
     def _create_cluster_details_sheet(self, workbook: Workbook, results: Dict[str, Any]):

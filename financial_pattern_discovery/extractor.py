@@ -51,17 +51,36 @@ class FinancialTermExtractor:
             # Try reading with openpyxl for better format detection
             workbook = load_workbook(file_path, read_only=True)
             headers = []
+            file_stats = {
+                'file_path': str(file_path),
+                'file_name': file_path.name,
+                'total_sheets': len(workbook.sheetnames),
+                'sheets': {}
+            }
             
             for sheet_name in workbook.sheetnames:
                 try:
                     sheet = workbook[sheet_name]
                     sheet_headers = self._extract_headers_from_sheet(sheet, sheet_name, file_path)
                     headers.extend(sheet_headers)
+                    
+                    # Collect sheet statistics
+                    file_stats['sheets'][sheet_name] = {
+                        'max_row': sheet.max_row,
+                        'max_column': sheet.max_column,
+                        'headers_found': len(sheet_headers)
+                    }
+                    
                 except Exception as e:
                     self.logger.warning(f"Failed to process sheet {sheet_name}: {e}")
                     continue
             
             workbook.close()
+            
+            # Calculate file totals
+            file_stats['total_max_rows'] = max([stats['max_row'] for stats in file_stats['sheets'].values()]) if file_stats['sheets'] else 0
+            file_stats['total_max_columns'] = max([stats['max_column'] for stats in file_stats['sheets'].values()]) if file_stats['sheets'] else 0
+            file_stats['total_headers_found'] = len(headers)
             
             # Remove duplicates while preserving location info for the first occurrence
             seen_terms = {}
@@ -71,6 +90,8 @@ class FinancialTermExtractor:
                 term = header_info['term']
                 if term not in seen_terms:
                     seen_terms[term] = True
+                    # Add file statistics to each header info
+                    header_info['file_stats'] = file_stats
                     unique_headers.append(header_info)
             
             return unique_headers

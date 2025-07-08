@@ -29,6 +29,8 @@ class ProcessingConfig:
     temp_dir: Path = Path('./temp')
     fuzzy_threshold: int = 80
     memory_threshold: float = 0.8
+    exclude_generic_canonicals: bool = True  # New option to exclude junk canonical names
+    exclude_low_priority_canonicals: bool = True  # Option to exclude low-priority terms
 
 
 @dataclass

@@ -162,9 +162,10 @@ class FinancialTermClustering:
             tfidf_matrix = vectorizer.fit_transform(terms)
             
             # Determine number of clusters for this group
-            # More aggressive clustering for class terms to separate concepts
+            # More aggressive clustering for class terms to separate different amount types
             if group_name.startswith("class_"):
-                n_clusters = min(len(terms), max(2, len(terms) // 2))
+                # Create more clusters to separate distributable vs shortfall vs other types
+                n_clusters = min(len(terms), max(2, len(terms) // 2))  # Back to more aggressive clustering
             else:
                 n_clusters = min(len(terms), max(2, len(terms) // 3))
             
