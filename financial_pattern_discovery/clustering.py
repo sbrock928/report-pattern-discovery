@@ -139,7 +139,7 @@ class FinancialTermClustering:
         return clusters
     
     def _cluster_similar_terms(self, terms: List[str], group_name: str) -> List[Dict[str, Any]]:
-        """Cluster similar terms within a group (class or general)"""
+        """Cluster similar terms within a group (class or general) - ENHANCED for granular preservation"""
         if len(terms) <= 2:
             # Very few terms - each gets its own cluster
             return [{
@@ -148,6 +148,10 @@ class FinancialTermClustering:
                 'top_features': [term],
                 'mean_tfidf_scores': [1.0]
             } for term in terms]
+
+        # ENHANCED: For class-specific terms, use semantic grouping to preserve granularity
+        if group_name.startswith("class_"):
+            return self._semantic_grouping_for_class_terms(terms, group_name)
         
         try:
             # Create TF-IDF vectorizer for this group
@@ -162,12 +166,8 @@ class FinancialTermClustering:
             tfidf_matrix = vectorizer.fit_transform(terms)
             
             # Determine number of clusters for this group
-            # More aggressive clustering for class terms to separate different amount types
-            if group_name.startswith("class_"):
-                # Create more clusters to separate distributable vs shortfall vs other types
-                n_clusters = min(len(terms), max(2, len(terms) // 2))  # Back to more aggressive clustering
-            else:
-                n_clusters = min(len(terms), max(2, len(terms) // 3))
+            # More conservative clustering for general terms
+            n_clusters = min(len(terms), max(2, len(terms) // 3))
             
             # Perform K-means clustering
             kmeans = KMeans(
@@ -213,7 +213,129 @@ class FinancialTermClustering:
                 'top_features': [term],
                 'mean_tfidf_scores': [1.0]
             } for term in terms]
-    
+
+    def _semantic_grouping_for_class_terms(self, terms: List[str], group_name: str) -> List[Dict[str, Any]]:
+        """ENHANCED: Semantic grouping that preserves granular financial distinctions"""
+        
+        # Define financial semantic categories to preserve distinctions
+        financial_categories = {
+            'interest_distributable': ['interest', 'distributable'],
+            'interest_shortfall': ['interest', 'shortfall'], 
+            'principal_distributable': ['principal', 'distributable'],
+            'principal_shortfall': ['principal', 'shortfall'],
+            'allocation_principal': ['allocation', 'principal'],
+            'allocation_interest': ['allocation', 'interest'],
+            'balance_beginning': ['balance', 'beginning'],
+            'balance_ending': ['balance', 'ending'],
+            'amount_payment': ['amount', 'payment'],
+            'factor': ['factor'],
+            'fee': ['fee'],
+            'rate': ['rate'],
+            'other': []  # Catch-all
+        }
+        
+        # Group terms by their semantic financial category
+        semantic_groups = {category: [] for category in financial_categories.keys()}
+        
+        for term in terms:
+            term_lower = term.lower()
+            categorized = False
+            
+            # Check each financial category (except 'other')
+            for category, keywords in financial_categories.items():
+                if category == 'other':
+                    continue
+                    
+                # Term must contain ALL keywords in the category
+                if all(keyword in term_lower for keyword in keywords):
+                    semantic_groups[category].append(term)
+                    categorized = True
+                    break
+            
+            # If no specific category matched, put in 'other'
+            if not categorized:
+                semantic_groups['other'].append(term)
+        
+        # Create clusters from semantic groups
+        clusters = []
+        
+        for category, category_terms in semantic_groups.items():
+            if not category_terms:
+                continue
+                
+            # For each semantic category, create granular sub-clusters 
+            # to preserve specific distinctions (e.g., pari passu vs regular)
+            if len(category_terms) == 1:
+                # Single term gets its own cluster
+                clusters.append({
+                    'terms': category_terms,
+                    'count': 1,
+                    'top_features': [category_terms[0]],
+                    'mean_tfidf_scores': [1.0],
+                    'semantic_category': category
+                })
+            else:
+                # Multiple terms in same category - create sub-clusters based on additional distinctions
+                sub_clusters = self._create_granular_subclusters(category_terms, category)
+                clusters.extend(sub_clusters)
+        
+        self.logger.info(f"Created {len(clusters)} semantic clusters for {group_name} from {len(terms)} terms")
+        return clusters
+
+    def _create_granular_subclusters(self, terms: List[str], category: str) -> List[Dict[str, Any]]:
+        """Create granular sub-clusters that preserve specific distinctions"""
+        
+        # Define granular distinction patterns
+        distinction_patterns = {
+            'pari_passu': ['pari passu', 'pari-passu'],
+            'monthly': ['monthly'],
+            'period': ['period'],
+            'aggregate': ['aggregate'],
+            'noteholders': ['noteholders', 'note holders'],
+            'calculation': ['calculation'],
+            'beginning': ['beginning'],
+            'ending': ['ending'],
+            'first': ['first'],
+            'second': ['second'],
+            'third': ['third'],
+            'fourth': ['fourth'],
+            'fifth': ['fifth'],
+            'sixth': ['sixth']
+        }
+        
+        # Group terms by their distinction patterns
+        distinction_groups = {}
+        
+        for term in terms:
+            term_lower = term.lower()
+            
+            # Find all distinctions that apply to this term
+            distinctions = []
+            for distinction, patterns in distinction_patterns.items():
+                if any(pattern in term_lower for pattern in patterns):
+                    distinctions.append(distinction)
+            
+            # Create a key from the distinctions (sorted for consistency)
+            distinction_key = '_'.join(sorted(distinctions)) if distinctions else 'base'
+            
+            if distinction_key not in distinction_groups:
+                distinction_groups[distinction_key] = []
+            distinction_groups[distinction_key].append(term)
+        
+        # Convert distinction groups to clusters
+        clusters = []
+        for distinction_key, group_terms in distinction_groups.items():
+            clusters.append({
+                'terms': group_terms,
+                'count': len(group_terms),
+                'top_features': [group_terms[0]],  # Use first term as representative
+                'mean_tfidf_scores': [1.0],
+                'semantic_category': category,
+                'distinction': distinction_key
+            })
+        
+        return clusters
+
     def _has_class_terms(self, terms: List[str]) -> bool:
         """Check if any term in the list contains class identifiers"""
         class_pattern = re.compile(r'\bclass\s+[a-f]\b', re.IGNORECASE)

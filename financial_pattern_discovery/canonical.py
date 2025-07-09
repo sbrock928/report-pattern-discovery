@@ -202,25 +202,29 @@ class CanonicalNameGenerator:
         elif concept_components['tranche']:
             canonical_parts.append(f"tranche_{concept_components['tranche']}")
         
-        # 2. Financial instrument type
-        if concept_components['instrument']:
-            canonical_parts.append(concept_components['instrument'])
-        
-        # 3. Amount type (single, specific type)
-        if concept_components['amount_type']:
-            canonical_parts.append(concept_components['amount_type'])
-        
-        # 4. Financial action/type
-        if concept_components['action']:
-            canonical_parts.append(concept_components['action'])
-        
-        # 5. Financial concept
-        if concept_components['concept']:
-            canonical_parts.append(concept_components['concept'])
-        
-        # 6. Temporal aspect
-        if concept_components['temporal']:
-            canonical_parts.append(concept_components['temporal'])
+        # 2. Use granular_type if available (this captures the specific distinctions)
+        if concept_components['granular_type']:
+            canonical_parts.append(concept_components['granular_type'])
+        else:
+            # 3. Financial instrument type
+            if concept_components['instrument']:
+                canonical_parts.append(concept_components['instrument'])
+            
+            # 4. Amount type (single, specific type)
+            if concept_components['amount_type']:
+                canonical_parts.append(concept_components['amount_type'])
+            
+            # 5. Financial action/type
+            if concept_components['action']:
+                canonical_parts.append(concept_components['action'])
+            
+            # 6. Financial concept
+            if concept_components['concept']:
+                canonical_parts.append(concept_components['concept'])
+            
+            # 7. Temporal aspect
+            if concept_components['temporal']:
+                canonical_parts.append(concept_components['temporal'])
         
         # If we have parts, join them
         if canonical_parts:
@@ -238,15 +242,38 @@ class CanonicalNameGenerator:
             'action': None,
             'concept': None,
             'temporal': None,
-            'amount_type': None  # Back to single amount type to create distinct canonical names
+            'amount_type': None,
+            'granular_type': None  # NEW: For capturing specific granular distinctions
         }
         
         # Check for direct financial terms first (highest priority)
         all_text = ' '.join(terms).lower()
         
-        # Enhanced direct financial term patterns with amount type distinctions
+        # ENHANCED: More comprehensive direct financial term patterns
         direct_financial_patterns = [
-            # More specific servicer fee patterns first - handle both "servicer" and "servicing"
+            # Class-specific interest distributable amounts (most specific first)
+            (r'\bclass\s+[a-f]\s+noteholders.*interest\s+distributable\s+amount.*pari\s+passu\b', 'class_interest_distributable_pari_passu'),
+            (r'\bclass\s+[a-f]\s+noteholders.*interest\s+distributable\s+amount\b', 'class_interest_distributable_amount'),
+            (r'\bclass\s+[a-f]\s+noteholders.*principal\s+distributable\s+amount\b', 'class_principal_distributable_amount'),
+            (r'\bclass\s+[a-f].*interest\s+distributable\s+amount\b', 'class_interest_distributable_amount'),
+            (r'\bclass\s+[a-f].*principal\s+distributable\s+amount\b', 'class_principal_distributable_amount'),
+            (r'\bclass\s+[a-f].*interest\s+shortfall\b', 'class_interest_shortfall'),
+            (r'\bclass\s+[a-f].*principal\s+shortfall\b', 'class_principal_shortfall'),
+            (r'\bclass\s+[a-f].*carryover\s+shortfall\b', 'class_carryover_shortfall'),
+            
+            # Allocation patterns
+            (r'\bfirst\s+allocation\s+principal\b', 'first_allocation_principal'),
+            (r'\bsecond\s+allocation\s+principal\b', 'second_allocation_principal'),
+            (r'\bthird\s+allocation\s+principal\b', 'third_allocation_principal'),
+            (r'\bfourth\s+allocation\s+principal\b', 'fourth_allocation_principal'),
+            (r'\bfifth\s+allocation\s+principal\b', 'fifth_allocation_principal'),
+            (r'\bsixth\s+allocation\s+principal\b', 'sixth_allocation_principal'),
+            
+            # Calculation patterns
+            (r'\bcalculation\s+interest\s+distributable\s+amount\b', 'calculation_interest_distributable_amount'),
+            (r'\bcalculation\s+principal\s+distributable\s+amount\b', 'calculation_principal_distributable_amount'),
+            
+            # More specific servicer fee patterns
             (r'\bbackup\s+servicing\s+fee\b', 'backup_servicing_fee'),
             (r'\bbackup\s+servicer\s+fee\b', 'backup_servicer_fee'),
             (r'\bservicing\s+fee\b', 'servicing_fee'),
@@ -263,15 +290,29 @@ class CanonicalNameGenerator:
             (r'\breserve\s+fund\b', 'reserve_fund'),
             (r'\bpool\s+factor\b', 'pool_factor'),
             (r'\bovercollateralization\b', 'overcollateralization'),
+            
+            # Balance patterns
+            (r'\bbeginning\s+period\s+aggregate\s+principal\s+balance\b', 'beginning_aggregate_principal_balance'),
+            (r'\bending\s+period\s+aggregate\s+principal\s+balance\b', 'ending_aggregate_principal_balance'),
+            (r'\bmonthly\s+period\s+receivables\s+principal\s+balance\b', 'monthly_receivables_principal_balance'),
+            
+            # Payment patterns
+            (r'\bmonthly\s+principal\s+amounts\b', 'monthly_principal_amounts'),
+            (r'\bdays\s+interest\s+period\b', 'days_interest_period'),
         ]
         
         # Check for direct financial terms first - if found, use them directly
         for pattern, canonical_name in direct_financial_patterns:
             if re.search(pattern, all_text):
-                # Return early with the specific financial term
+                # Extract class letter if present and incorporate it
+                class_match = re.search(r'class\s+([a-f])\b', all_text)
+                if class_match and 'class' in canonical_name:
+                    class_letter = class_match.group(1)
+                    canonical_name = canonical_name.replace('class', f'class_{class_letter}')
+                
                 return {'direct_financial_term': canonical_name}
         
-        # Continue with enhanced class-aware logic
+        # Continue with enhanced class-aware logic for terms that don't match direct patterns
         class_letters = set()
         for term in terms:
             class_match = re.search(r'class\s*([a-f])\b', term.lower())
@@ -303,9 +344,43 @@ class CanonicalNameGenerator:
         if len(tranche_letters) == 1:
             components['tranche'] = list(tranche_letters)[0]
 
+        # ENHANCED: Extract granular type distinctions from semantic categories
+        # This uses the semantic_category from the clustering
+        for term in terms:
+            term_lower = term.lower()
+            
+            # Check for specific granular patterns
+            if 'interest' in term_lower and 'distributable' in term_lower:
+                if 'pari passu' in term_lower:
+                    components['granular_type'] = 'interest_distributable_pari_passu'
+                else:
+                    components['granular_type'] = 'interest_distributable'
+            elif 'principal' in term_lower and 'distributable' in term_lower:
+                components['granular_type'] = 'principal_distributable'
+            elif 'interest' in term_lower and 'shortfall' in term_lower:
+                components['granular_type'] = 'interest_shortfall'
+            elif 'principal' in term_lower and 'shortfall' in term_lower:
+                components['granular_type'] = 'principal_shortfall'
+            elif 'carryover' in term_lower and 'shortfall' in term_lower:
+                components['granular_type'] = 'carryover_shortfall'
+            elif 'allocation' in term_lower and 'principal' in term_lower:
+                # Check for specific allocation orders
+                for order in ['first', 'second', 'third', 'fourth', 'fifth', 'sixth']:
+                    if order in term_lower:
+                        components['granular_type'] = f'{order}_allocation_principal'
+                        break
+                if not components['granular_type']:
+                    components['granular_type'] = 'allocation_principal'
+            elif 'allocation' in term_lower and 'interest' in term_lower:
+                components['granular_type'] = 'allocation_interest'
+            
+            # Break after finding the first granular type to avoid confusion
+            if components['granular_type']:
+                break
+
         # Extract specific amount type (prioritize more specific types)
         amount_type_patterns = [
-            (r'\bcarryover\s+shortfall\b', 'carryover_shortfall'),  # Most specific first
+            (r'\bcarryover\s+shortfall\b', 'carryover_shortfall'),
             (r'\binterest\s+carryover\s+shortfall\b', 'interest_carryover_shortfall'),
             (r'\bprincipal\s+carryover\s+shortfall\b', 'principal_carryover_shortfall'),
             (r'\binterest\s+distributable\s+amount\b', 'interest_distributable_amount'),
@@ -324,8 +399,7 @@ class CanonicalNameGenerator:
                 components['amount_type'] = amount_type
                 break
 
-        # FIXED: Extract instrument types with proper principal/interest distinction
-        # Check for principal vs interest with more specific logic
+        # Extract instrument types with better principal/interest distinction
         principal_count = len(re.findall(r'\bprincipal\b', all_text))
         interest_count = len(re.findall(r'\binterest\b', all_text))
         
@@ -343,19 +417,6 @@ class CanonicalNameGenerator:
                 components['instrument'] = 'principal'
             elif interest_terms > principal_terms:
                 components['instrument'] = 'interest'
-            # If still tied, don't set instrument to avoid confusion
-        
-        # Check for other instrument types if no principal/interest dominance
-        if not components['instrument']:
-            other_instrument_patterns = [
-                (r'\b(note|certificate|bond|security)\b', None),
-            ]
-            
-            for pattern, _ in other_instrument_patterns:
-                match = re.search(pattern, all_text)
-                if match:
-                    components['instrument'] = match.group(1)
-                    break
         
         # Extract financial actions/operations
         action_patterns = [
@@ -363,6 +424,7 @@ class CanonicalNameGenerator:
             (r'\b(purchase|sale|transfer|exchange)\b', None),
             (r'\b(accrual|accrue|accrued)\b', 'accrued'),
             (r'\b(outstanding|aggregate|available|required)\b', None),
+            (r'\b(calculation|compute)\b', 'calculation'),
         ]
         
         for pattern, replacement in action_patterns:
